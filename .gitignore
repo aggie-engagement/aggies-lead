@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js
+.next/
+out/
+
+# local package-manager bootstrap used by this workspace
+.tools/
+
+# environment
+.env*
+
+# logs
+*.log
+
+# OS/editor
+.DS_Store
+Thumbs.db
