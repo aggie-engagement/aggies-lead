@@ -1,6 +1,8 @@
 # dependencies
 node_modules/
 .pnpm-store/
+.npm-cache/
+.npm-lock-tmp/
 
 # Next.js
 .next/

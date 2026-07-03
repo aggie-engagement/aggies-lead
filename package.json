@@ -2,17 +2,11 @@
   "name": "aggies-lead",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@11.2.2",
+  "packageManager": "npm@11.12.1",
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "sharp",
-      "unrs-resolver"
-    ]
   },
   "dependencies": {
     "lucide-react": "1.16.0",
