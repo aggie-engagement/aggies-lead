@@ -8,6 +8,12 @@
     "build": "next build --webpack",
     "start": "next start"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "sharp",
+      "unrs-resolver"
+    ]
+  },
   "dependencies": {
     "lucide-react": "1.16.0",
     "next": "16.2.6",
