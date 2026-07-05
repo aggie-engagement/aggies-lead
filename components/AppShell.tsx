@@ -46,6 +46,15 @@ const homeNavItems = [
   { href: "/add-to-phone", label: "Add to Phone" },
 ];
 
+function uniqueNavItemsByHref<T extends { href: string }>(items: T[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.href)) return false;
+    seen.add(item.href);
+    return true;
+  });
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -68,6 +77,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const roleAwareHomeItems = homeNavItems.map((item) =>
     item.href === "/dashboard" ? { ...item, href: dashboardHref } : item,
   );
+  const visibleHomeItems = uniqueNavItemsByHref(roleAwareHomeItems);
 
   useEffect(() => {
     if (!isReady || !user || user.role !== "student-athlete") return;
@@ -108,7 +118,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-3">
           {isHome ? (
             <nav className="hidden gap-2 md:flex">
-              {roleAwareHomeItems.map((item) => (
+              {visibleHomeItems.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
