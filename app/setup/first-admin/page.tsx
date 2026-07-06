@@ -31,6 +31,11 @@ const emptyForm: FirstAdminForm = {
   confirmPassword: "",
 };
 
+async function getSupabaseClient() {
+  const { supabase } = await import("@/lib/supabase");
+  return supabase;
+}
+
 export default function FirstAdminSetupPage() {
   const router = useRouter();
   const { loginWithCredentials } = useAuth();
@@ -38,21 +43,45 @@ export default function FirstAdminSetupPage() {
   const [message, setMessage] = useState("");
   const [setupAllowed, setSetupAllowed] = useState(false);
   const [ready, setReady] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    ensureAccessSeedData();
-    const users = readJson<User[]>(accessStorageKeys.users, seedUsers);
-    const allowed = shouldShowFirstAdminSetup(users);
-    setSetupAllowed(allowed);
-    setReady(true);
+    let active = true;
+
+    async function checkSetupStatus() {
+      ensureAccessSeedData();
+      const users = readJson<User[]>(accessStorageKeys.users, seedUsers);
+      const localSetupAllowed = shouldShowFirstAdminSetup(users);
+      const supabase = await getSupabaseClient();
+      const { data: adminExists, error } = await supabase.rpc("first_admin_exists");
+
+      if (!active) return;
+
+      if (error) {
+        setSetupAllowed(false);
+        setMessage("Unable to verify Supabase admin setup status. Apply the first-admin setup migration, then try again.");
+        setReady(true);
+        return;
+      }
+
+      setSetupAllowed(localSetupAllowed && !adminExists);
+      setReady(true);
+    }
+
+    checkSetupStatus();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const setField = (field: keyof FirstAdminForm, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
 
-  const createFirstAdmin = (event: React.FormEvent<HTMLFormElement>) => {
+  const createFirstAdmin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setMessage("");
     const firstName = form.firstName.trim();
     const lastName = form.lastName.trim();
     const email = form.email.trim().toLowerCase();
@@ -82,9 +111,60 @@ export default function FirstAdminSetupPage() {
       return;
     }
 
+    setCreating(true);
+
+    const supabase = await getSupabaseClient();
+    const { data: adminExists, error: adminCheckError } = await supabase.rpc("first_admin_exists");
+    if (adminCheckError) {
+      setCreating(false);
+      setMessage("Unable to verify Supabase admin setup status. Apply the first-admin setup migration, then try again.");
+      return;
+    }
+    if (adminExists) {
+      setCreating(false);
+      setSetupAllowed(false);
+      setMessage("An admin account already exists. Future admins must be added through Admin Settings.");
+      return;
+    }
+
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+          role: "admin",
+        },
+      },
+    });
+
+    if (signUpError) {
+      setCreating(false);
+      setMessage(signUpError.message);
+      return;
+    }
+
+    if (!signUpData.user) {
+      setCreating(false);
+      setMessage("Supabase created no user for this signup. Try again or check your Supabase Auth settings.");
+      return;
+    }
+
+    const { error: profileError } = await supabase.rpc("create_first_admin_profile", {
+      first_name: firstName,
+      last_name: lastName,
+    });
+
+    if (profileError) {
+      setCreating(false);
+      setMessage(profileError.message);
+      return;
+    }
+
     const timestamp = new Date().toISOString();
     const firstAdmin: User = {
-      id: `admin-${Date.now()}`,
+      id: signUpData.user.id,
       firstName,
       lastName,
       email,
@@ -105,6 +185,7 @@ export default function FirstAdminSetupPage() {
       activationLink: `${window.location.origin}/admin-dashboard`,
     });
     const result = loginWithCredentials(email, password);
+    setCreating(false);
     router.push(result.href ?? "/admin-dashboard");
   };
 
@@ -117,14 +198,16 @@ export default function FirstAdminSetupPage() {
   }
 
   if (!setupAllowed) {
+    const setupUnavailable = message.startsWith("Unable to verify");
+
     return (
       <section className="card-surface rounded-lg p-7">
         <p className="text-sm font-bold uppercase tracking-[0.28em] text-aggie-silver">Admin Setup</p>
         <h1 className="text-glow mt-3 text-4xl font-black tracking-tight text-white md:text-5xl">
-          First Admin Already Created
+          {setupUnavailable ? "Admin Setup Unavailable" : "First Admin Already Created"}
         </h1>
         <p className="mt-4 max-w-3xl text-lg leading-8 text-aggie-light/78">
-          Future admins must be added by an existing admin through Admin Settings.
+          {message || "Future admins must be added by an existing admin through Admin Settings."}
         </p>
         <button
           type="button"
@@ -167,9 +250,10 @@ export default function FirstAdminSetupPage() {
         ) : null}
         <button
           type="submit"
-          className="chrome-surface mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-lg border border-aggie-chrome/60 px-5 text-sm font-black text-aggie-navy shadow-glow transition hover:brightness-110"
+          disabled={creating}
+          className="chrome-surface mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-lg border border-aggie-chrome/60 px-5 text-sm font-black text-aggie-navy shadow-glow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
         >
-          Create First Admin Account
+          {creating ? "Creating First Admin..." : "Create First Admin Account"}
         </button>
       </form>
     </div>
