@@ -31,9 +31,26 @@ const emptyForm: FirstAdminForm = {
   confirmPassword: "",
 };
 
+type SupabaseDebugError = {
+  message?: string;
+  code?: string;
+  details?: string;
+  hint?: string;
+};
+
 async function getSupabaseClient() {
   const { supabase } = await import("@/lib/supabase");
   return supabase;
+}
+
+function formatSupabaseRpcError(context: string, error: SupabaseDebugError) {
+  return [
+    `Unable to verify Supabase admin setup status. ${context}`,
+    `message: ${error.message ?? "none"}`,
+    `code: ${error.code ?? "none"}`,
+    `details: ${error.details ?? "none"}`,
+    `hint: ${error.hint ?? "none"}`,
+  ].join("\n");
 }
 
 export default function FirstAdminSetupPage() {
@@ -59,7 +76,7 @@ export default function FirstAdminSetupPage() {
 
       if (error) {
         setSetupAllowed(false);
-        setMessage("Unable to verify Supabase admin setup status. Apply the first-admin setup migration, then try again.");
+        setMessage(formatSupabaseRpcError("first_admin_exists failed during page load.", error));
         setReady(true);
         return;
       }
@@ -117,7 +134,7 @@ export default function FirstAdminSetupPage() {
     const { data: adminExists, error: adminCheckError } = await supabase.rpc("first_admin_exists");
     if (adminCheckError) {
       setCreating(false);
-      setMessage("Unable to verify Supabase admin setup status. Apply the first-admin setup migration, then try again.");
+      setMessage(formatSupabaseRpcError("first_admin_exists failed before creating the admin.", adminCheckError));
       return;
     }
     if (adminExists) {
@@ -206,7 +223,7 @@ export default function FirstAdminSetupPage() {
         <h1 className="text-glow mt-3 text-4xl font-black tracking-tight text-white md:text-5xl">
           {setupUnavailable ? "Admin Setup Unavailable" : "First Admin Already Created"}
         </h1>
-        <p className="mt-4 max-w-3xl text-lg leading-8 text-aggie-light/78">
+        <p className="mt-4 max-w-3xl whitespace-pre-wrap text-lg leading-8 text-aggie-light/78">
           {message || "Future admins must be added by an existing admin through Admin Settings."}
         </p>
         <button
@@ -244,7 +261,7 @@ export default function FirstAdminSetupPage() {
           <TextInput label="Confirm Password" value={form.confirmPassword} type="password" onChange={(value) => setField("confirmPassword", value)} />
         </div>
         {message ? (
-          <p className="mt-4 rounded-lg border border-red-300/25 bg-red-300/10 p-4 text-sm font-bold text-aggie-light">
+          <p className="mt-4 whitespace-pre-wrap rounded-lg border border-red-300/25 bg-red-300/10 p-4 text-sm font-bold text-aggie-light">
             {message}
           </p>
         ) : null}
