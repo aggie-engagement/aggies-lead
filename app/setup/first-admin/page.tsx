@@ -38,6 +38,17 @@ type SupabaseDebugError = {
   hint?: string;
 };
 
+const pendingFirstAdminKey = "aggies-lead:pending-first-admin";
+const authUserStorageKey = "aggies-lead:auth-user";
+
+type PendingFirstAdmin = {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+};
+
 async function getSupabaseClient() {
   const { supabase } = await import("@/lib/supabase");
   return supabase;
@@ -51,6 +62,33 @@ function formatSupabaseRpcError(context: string, error: SupabaseDebugError) {
     `details: ${error.details ?? "none"}`,
     `hint: ${error.hint ?? "none"}`,
   ].join("\n");
+}
+
+function readPendingFirstAdmin() {
+  if (typeof window === "undefined") return null;
+  const saved = window.sessionStorage.getItem(pendingFirstAdminKey);
+  if (!saved) return null;
+  try {
+    return JSON.parse(saved) as PendingFirstAdmin;
+  } catch {
+    window.sessionStorage.removeItem(pendingFirstAdminKey);
+    return null;
+  }
+}
+
+function writePendingFirstAdmin(pendingAdmin: PendingFirstAdmin) {
+  window.sessionStorage.setItem(pendingFirstAdminKey, JSON.stringify(pendingAdmin));
+}
+
+function clearPendingFirstAdmin() {
+  window.sessionStorage.removeItem(pendingFirstAdminKey);
+}
+
+function createLocalAdminSession(admin: User) {
+  const users = readJson<User[]>(accessStorageKeys.users, seedUsers);
+  const nextUsers = [admin, ...users.filter((user) => user.id !== admin.id && user.email.toLowerCase() !== admin.email.toLowerCase())];
+  writeJson(accessStorageKeys.users, nextUsers);
+  window.localStorage.setItem(authUserStorageKey, JSON.stringify({ ...admin, name: `${admin.firstName} ${admin.lastName}`.trim() }));
 }
 
 export default function FirstAdminSetupPage() {
@@ -70,6 +108,7 @@ export default function FirstAdminSetupPage() {
       const users = readJson<User[]>(accessStorageKeys.users, seedUsers);
       const localSetupAllowed = shouldShowFirstAdminSetup(users);
       const supabase = await getSupabaseClient();
+      const { data: sessionData } = await supabase.auth.getSession();
       const { data: adminExists, error } = await supabase.rpc("first_admin_exists");
 
       if (!active) return;
@@ -78,6 +117,77 @@ export default function FirstAdminSetupPage() {
         setSetupAllowed(false);
         setMessage(formatSupabaseRpcError("first_admin_exists failed during page load.", error));
         setReady(true);
+        return;
+      }
+
+      if (sessionData.session?.user && !adminExists) {
+        const signedInUser = sessionData.session.user;
+        const pendingAdmin = readPendingFirstAdmin();
+        const firstName = String(signedInUser.user_metadata.first_name ?? pendingAdmin?.firstName ?? "").trim();
+        const lastName = String(signedInUser.user_metadata.last_name ?? pendingAdmin?.lastName ?? "").trim();
+        const email = signedInUser.email?.toLowerCase() ?? pendingAdmin?.email ?? "";
+
+        if (!firstName || !lastName || !email) {
+          setSetupAllowed(false);
+          setMessage("You are signed in, but the first admin name or email is missing. Sign out of Supabase and restart first admin setup.");
+          setReady(true);
+          return;
+        }
+
+        setCreating(true);
+        const { data: existingProfile, error: profileReadError } = await supabase
+          .from("profiles")
+          .select("id, role")
+          .eq("id", signedInUser.id)
+          .maybeSingle();
+
+        if (!active) return;
+
+        if (profileReadError) {
+          setSetupAllowed(false);
+          setCreating(false);
+          setMessage(formatSupabaseRpcError("profile lookup failed after email verification.", profileReadError));
+          setReady(true);
+          return;
+        }
+
+        if (!existingProfile) {
+          const { error: profileError } = await supabase.rpc("create_first_admin_profile", {
+            first_name: firstName,
+            last_name: lastName,
+          });
+
+          if (!active) return;
+
+          if (profileError) {
+            setSetupAllowed(false);
+            setCreating(false);
+            setMessage(profileError.message);
+            setReady(true);
+            return;
+          }
+        }
+
+        const timestamp = new Date().toISOString();
+        const firstAdmin: User = {
+          id: signedInUser.id,
+          firstName,
+          lastName,
+          email,
+          role: "admin",
+          teamIds: [],
+          title: "Program Administrator",
+          status: "active",
+          mustChangePassword: false,
+          password: pendingAdmin?.password ?? "",
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          isSeedAccount: false,
+        };
+
+        createLocalAdminSession(firstAdmin);
+        clearPendingFirstAdmin();
+        router.push("/admin-dashboard");
         return;
       }
 
@@ -90,7 +200,7 @@ export default function FirstAdminSetupPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [router]);
 
   const setField = (field: keyof FirstAdminForm, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -169,6 +279,13 @@ export default function FirstAdminSetupPage() {
     }
 
     if (!signUpData.session) {
+      writePendingFirstAdmin({
+        userId: signUpData.user.id,
+        firstName,
+        lastName,
+        email,
+        password,
+      });
       setCreating(false);
       setMessage("Check your email to verify this admin account. After verification, return to this page and sign in before completing first admin setup.");
       return;
