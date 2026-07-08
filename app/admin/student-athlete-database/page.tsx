@@ -50,6 +50,11 @@ const requiredFields: (keyof StudentForm)[] = [
 
 const temporaryStudentPassword = "aggieslead";
 
+async function getSupabaseClient() {
+  const { supabase } = await import("@/lib/supabase");
+  return supabase;
+}
+
 export default function StudentAthleteDatabasePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [records, setRecords] = useState<StudentAthleteRecord[]>([]);
@@ -86,7 +91,7 @@ export default function StudentAthleteDatabasePage() {
     writeStudentAthletes(nextRecords);
   };
 
-  const addStudentAthlete = (event: React.FormEvent<HTMLFormElement>) => {
+  const addStudentAthlete = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const missing = requiredFields.filter((field) => !form[field].trim());
     if (missing.length) {
@@ -102,6 +107,12 @@ export default function StudentAthleteDatabasePage() {
       setMessage("A user account with that email already exists.");
       return;
     }
+    const supabase = await getSupabaseClient();
+    const { error: inviteError } = await supabase.rpc("create_student_activation_invite", {
+      p_email: form.email.trim().toLowerCase(),
+      p_first_name: form.firstName.trim(),
+      p_last_name: form.lastName.trim(),
+    });
     const timestamp = new Date().toISOString();
     const userId = `student-${Date.now()}`;
     const nextRecord: StudentAthleteRecord = {
@@ -163,7 +174,11 @@ export default function StudentAthleteDatabasePage() {
       loginLink: `${window.location.origin}/login`,
     });
     setForm(emptyForm);
-    setMessage("Student-athlete added with account status Pending Activation. Placeholder activation email queued.");
+    setMessage(
+      inviteError
+        ? `Student-athlete added locally with account status Pending Activation, but Supabase activation invite failed: ${inviteError.message}`
+        : "Student-athlete added with account status Pending Activation. Supabase activation invite created and placeholder activation email queued.",
+    );
   };
 
   const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {

@@ -67,6 +67,20 @@ const requiredFields: (keyof ProfileForm)[] = [
   "currentRoadmap",
 ];
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function sportSlug(name: string) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/'/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 export default function CompleteProfilePage() {
   const router = useRouter();
   const { user, refreshUser } = useAuth();
@@ -112,7 +126,7 @@ export default function CompleteProfilePage() {
     }));
   };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!user || !record) {
       setMessage("We could not find your student-athlete profile. Please contact Aggies Lead.");
@@ -134,6 +148,49 @@ export default function CompleteProfilePage() {
     if (!classYearOptions.includes(form.classYear)) {
       setMessage("Choose a valid class year.");
       return;
+    }
+
+    if (isUuid(user.id)) {
+      const { supabase } = await import("@/lib/supabase");
+      const { data: sport, error: sportError } = await supabase
+        .from("sports")
+        .select("id")
+        .eq("slug", sportSlug(form.sport))
+        .maybeSingle();
+
+      if (sportError) {
+        setMessage(sportError.message);
+        return;
+      }
+
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .update({
+          phone: form.phone.trim(),
+          profile_completed: true,
+        })
+        .eq("id", user.id);
+
+      if (profileError) {
+        setMessage(profileError.message);
+        return;
+      }
+
+      const { error: studentError } = await supabase
+        .from("student_athletes")
+        .update({
+          sport_id: sport?.id ?? null,
+          class_year: form.classYear,
+          entry_year: Number.parseInt(form.entryYear, 10),
+          expected_graduation_year: Number.parseInt(form.expectedGraduationYear, 10),
+          status: "active",
+        })
+        .eq("profile_id", user.id);
+
+      if (studentError) {
+        setMessage(studentError.message);
+        return;
+      }
     }
 
     const today = new Date().toLocaleDateString("en-US", {

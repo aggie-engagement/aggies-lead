@@ -17,6 +17,8 @@ import {
   writeJson,
 } from "@/lib/accessManagement";
 import type { User } from "@/lib/accessManagement";
+import { readStudentAthletes, writeStudentAthletes } from "@/lib/studentAthleteDatabase";
+import type { StudentAthleteRecord } from "@/lib/studentAthleteDatabase";
 
 const pendingFirstAdminKey = "aggies-lead:pending-first-admin";
 const authUserStorageKey = "aggies-lead:auth-user";
@@ -27,6 +29,7 @@ type SupabaseProfile = {
   first_name: string;
   last_name: string;
   role: "admin" | "coach" | "staff" | "student_athlete";
+  profile_completed: boolean;
 };
 
 type PendingFirstAdmin = {
@@ -111,6 +114,50 @@ function createLocalPrototypeSession(profile: SupabaseProfile, password: string)
   return localUser;
 }
 
+function ensureLocalStudentAthleteRecord(profile: SupabaseProfile) {
+  if (profile.role !== "student_athlete") return;
+  const records = readStudentAthletes();
+  if (records.some((record) => record.userId === profile.id || record.email.toLowerCase() === profile.email.toLowerCase())) return;
+  const nextRecord: StudentAthleteRecord = {
+    id: `student-record-${Date.now()}`,
+    userId: profile.id,
+    firstName: profile.first_name,
+    lastName: profile.last_name,
+    preferredName: "",
+    email: profile.email.toLowerCase(),
+    phone: "",
+    sport: "",
+    team: "",
+    classYear: "",
+    academicYear: "",
+    major: "",
+    minor: "",
+    expectedGraduationYear: "",
+    entryYear: "",
+    transferStatus: "",
+    currentRoadmap: "",
+    roadmapStartDate: "",
+    roadmapCompletedDate: "",
+    careerInterests: "",
+    linkedInUrl: "",
+    joinedAggiesLeadDate: "",
+    profileStatus: "Incomplete",
+    accountStatus: "Pending Activation",
+    completionPercentage: 0,
+    engagementScore: 0,
+    internshipStatus: "Not Started",
+    jobShadowStatus: "Not Started",
+    lastActiveDate: "Not active yet",
+    roadmapHistorySummary: "",
+    roadmapHistory: [],
+    eventAttendanceHistory: [],
+    staffNotes: [],
+    excludeFromAutoAdvancement: false,
+    isTestAccount: false,
+  };
+  writeStudentAthletes([nextRecord, ...records]);
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { loginAs, loginWithCredentials, role, user } = useAuth();
@@ -142,7 +189,7 @@ export default function LoginPage() {
     if (!signInError && signInData.user) {
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
-        .select("id, email, first_name, last_name, role")
+        .select("id, email, first_name, last_name, role, profile_completed")
         .eq("id", signInData.user.id)
         .maybeSingle<SupabaseProfile>();
 
@@ -181,19 +228,28 @@ export default function LoginPage() {
               first_name: firstName,
               last_name: lastName,
               role: "admin",
+              profile_completed: true,
             };
             clearPendingFirstAdmin();
+          }
+        } else {
+          const { data: claimedProfile, error: claimError } = await supabase.rpc("claim_student_activation_invite");
+          if (!claimError && claimedProfile) {
+            activeProfile = claimedProfile as SupabaseProfile;
           }
         }
       }
 
       if (activeProfile) {
         const localUser = createLocalPrototypeSession(activeProfile, password);
+        ensureLocalStudentAthleteRecord(activeProfile);
         setMessage("");
         window.location.href = localUser.role === "admin"
           ? "/admin-dashboard"
           : localUser.role === "student-athlete"
-            ? "/student-athlete-dashboard"
+            ? activeProfile.profile_completed
+              ? "/student-athlete-dashboard"
+              : "/complete-profile"
             : dashboardForRole(localUser.role);
         return;
       }

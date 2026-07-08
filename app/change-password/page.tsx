@@ -11,8 +11,9 @@ export default function ChangePasswordPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!user) {
       router.push("/login");
@@ -26,7 +27,42 @@ export default function ChangePasswordPage() {
       setMessage("Passwords do not match.");
       return;
     }
+    setSaving(true);
+    if (user.role === "student-athlete") {
+      const { supabase } = await import("@/lib/supabase");
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: user.email,
+        password,
+        options: {
+          data: {
+            first_name: user.firstName,
+            last_name: user.lastName,
+            role: "student_athlete",
+          },
+        },
+      });
+
+      if (signUpError) {
+        setSaving(false);
+        setMessage(signUpError.message);
+        return;
+      }
+
+      if (!signUpData.session) {
+        setSaving(false);
+        setMessage("Check your school email to verify your Aggies Lead account. After verification, log in with your school email and new password to finish your profile.");
+        return;
+      }
+
+      const { error: claimError } = await supabase.rpc("claim_student_activation_invite");
+      if (claimError) {
+        setSaving(false);
+        setMessage(claimError.message);
+        return;
+      }
+    }
     const href = changePassword(password);
+    setSaving(false);
     router.push(href);
   };
 
@@ -65,9 +101,10 @@ export default function ChangePasswordPage() {
           </label>
           <button
             type="submit"
-            className="chrome-surface inline-flex min-h-12 items-center justify-center rounded-lg border border-aggie-chrome/60 px-5 text-sm font-black text-aggie-navy shadow-glow transition hover:brightness-110"
+            disabled={saving}
+            className="chrome-surface inline-flex min-h-12 items-center justify-center rounded-lg border border-aggie-chrome/60 px-5 text-sm font-black text-aggie-navy shadow-glow transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-70"
           >
-            Save Password and Continue
+            {saving ? "Saving Password..." : "Save Password and Continue"}
           </button>
           {message ? (
             <p className="rounded-lg border border-red-300/25 bg-red-300/10 p-4 text-sm font-bold text-aggie-light">
