@@ -7,15 +7,35 @@ import { ShieldCheck, Users, UserRound } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useAuth } from "@/components/AuthState";
 import type { UserRole } from "@/lib/permissions";
-import { roleLabels } from "@/lib/permissions";
+import { dashboardForRole, roleLabels } from "@/lib/permissions";
 import {
   accessStorageKeys,
   ensureAccessSeedData,
   readJson,
   seedUsers,
   shouldShowFirstAdminSetup,
+  writeJson,
 } from "@/lib/accessManagement";
 import type { User } from "@/lib/accessManagement";
+
+const pendingFirstAdminKey = "aggies-lead:pending-first-admin";
+const authUserStorageKey = "aggies-lead:auth-user";
+
+type SupabaseProfile = {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  role: "admin" | "coach" | "staff" | "student_athlete";
+};
+
+type PendingFirstAdmin = {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+};
 
 const roleOptions: { role: UserRole; title: string; description: string; icon: LucideIcon }[] = [
   {
@@ -38,6 +58,59 @@ const roleOptions: { role: UserRole; title: string; description: string; icon: L
   },
 ];
 
+async function getSupabaseClient() {
+  const { supabase } = await import("@/lib/supabase");
+  return supabase;
+}
+
+function readPendingFirstAdmin() {
+  if (typeof window === "undefined") return null;
+  const saved = window.sessionStorage.getItem(pendingFirstAdminKey);
+  if (!saved) return null;
+  try {
+    return JSON.parse(saved) as PendingFirstAdmin;
+  } catch {
+    window.sessionStorage.removeItem(pendingFirstAdminKey);
+    return null;
+  }
+}
+
+function clearPendingFirstAdmin() {
+  window.sessionStorage.removeItem(pendingFirstAdminKey);
+}
+
+function toAppRole(role: SupabaseProfile["role"]): UserRole {
+  return role === "student_athlete" ? "student-athlete" : role === "admin" || role === "coach" ? role : "admin";
+}
+
+function createLocalPrototypeSession(profile: SupabaseProfile, password: string) {
+  const role = toAppRole(profile.role);
+  const timestamp = new Date().toISOString();
+  const localUser: User = {
+    id: profile.id,
+    firstName: profile.first_name,
+    lastName: profile.last_name,
+    email: profile.email.toLowerCase(),
+    role,
+    teamIds: [],
+    title: role === "admin" ? "Program Administrator" : roleLabels[role],
+    status: "active",
+    mustChangePassword: false,
+    password,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    isSeedAccount: false,
+  };
+  const users = readJson<User[]>(accessStorageKeys.users, seedUsers);
+  const nextUsers = [
+    localUser,
+    ...users.filter((user) => user.id !== localUser.id && user.email.toLowerCase() !== localUser.email.toLowerCase()),
+  ];
+  writeJson(accessStorageKeys.users, nextUsers);
+  window.localStorage.setItem(authUserStorageKey, JSON.stringify({ ...localUser, name: `${localUser.firstName} ${localUser.lastName}`.trim() }));
+  return localUser;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { loginAs, loginWithCredentials, role, user } = useAuth();
@@ -56,11 +129,79 @@ export default function LoginPage() {
     setShowFirstAdminSetup(shouldShowFirstAdminSetup(readJson<User[]>(accessStorageKeys.users, seedUsers)));
   }, []);
 
-  const handleCredentialLogin = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleCredentialLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const result = loginWithCredentials(email, password);
+    setMessage("");
+    const normalizedEmail = email.trim().toLowerCase();
+    const supabase = await getSupabaseClient();
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    });
+
+    if (!signInError && signInData.user) {
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("id, email, first_name, last_name, role")
+        .eq("id", signInData.user.id)
+        .maybeSingle<SupabaseProfile>();
+
+      if (profileError) {
+        setMessage(profileError.message);
+        return;
+      }
+
+      let activeProfile = profile;
+      if (!activeProfile) {
+        const { data: adminExists, error: adminCheckError } = await supabase.rpc("first_admin_exists");
+        if (adminCheckError) {
+          setMessage(adminCheckError.message);
+          return;
+        }
+
+        if (!adminExists) {
+          const pendingAdmin = readPendingFirstAdmin();
+          const firstName = String(signInData.user.user_metadata.first_name ?? pendingAdmin?.firstName ?? "").trim();
+          const lastName = String(signInData.user.user_metadata.last_name ?? pendingAdmin?.lastName ?? "").trim();
+
+          if (firstName && lastName) {
+            const { error: createProfileError } = await supabase.rpc("create_first_admin_profile", {
+              first_name: firstName,
+              last_name: lastName,
+            });
+
+            if (createProfileError) {
+              setMessage(createProfileError.message);
+              return;
+            }
+
+            activeProfile = {
+              id: signInData.user.id,
+              email: signInData.user.email ?? normalizedEmail,
+              first_name: firstName,
+              last_name: lastName,
+              role: "admin",
+            };
+            clearPendingFirstAdmin();
+          }
+        }
+      }
+
+      if (activeProfile) {
+        const localUser = createLocalPrototypeSession(activeProfile, password);
+        setMessage("");
+        window.location.href = localUser.role === "admin"
+          ? "/admin-dashboard"
+          : localUser.role === "student-athlete"
+            ? "/student-athlete-dashboard"
+            : dashboardForRole(localUser.role);
+        return;
+      }
+    }
+
+    const result = loginWithCredentials(normalizedEmail, password);
     if (!result.ok || !result.href) {
-      setMessage(result.message ?? "Unable to log in.");
+      setMessage(signInError?.message ?? result.message ?? "Unable to log in.");
       return;
     }
     setMessage("");
