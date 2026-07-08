@@ -168,6 +168,12 @@ export default function FirstAdminSetupPage() {
       return;
     }
 
+    if (!signUpData.session) {
+      setCreating(false);
+      setMessage("Check your email to verify this admin account. After verification, return to this page and sign in before completing first admin setup.");
+      return;
+    }
+
     const { error: profileError } = await supabase.rpc("create_first_admin_profile", {
       first_name: firstName,
       last_name: lastName,
