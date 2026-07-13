@@ -6,10 +6,10 @@ import Link from "next/link";
 import { Check, MapPinned, RotateCcw, Save, Search, Timer, UserRound, X } from "lucide-react";
 import { GhostButton } from "@/components/Prototype";
 import { campusNavigationLocations } from "@/lib/campusNavigationLocations";
+import { readStudentCampusNavigationLocations } from "@/lib/campusNavigationData";
 import { moduleHref, roadmapModules } from "@/lib/roadmaps";
 
 const storageKey = "aggies-lead:transfer:campus-navigation";
-const locations = campusNavigationLocations;
 
 const commonNicknames: Record<string, string[]> = {
   "fueling-station": ["fueling", "fuel", "nutrition"],
@@ -27,11 +27,12 @@ const commonNicknames: Record<string, string[]> = {
 };
 
 export function TransferCampusNavigationClient() {
+  const [locations, setLocations] = useState(campusNavigationLocations);
   const [visited, setVisited] = useState<string[]>([]);
-  const [selectedId, setSelectedId] = useState(locations[0].id);
+  const [selectedId, setSelectedId] = useState(campusNavigationLocations[0].id);
   const [searchTerm, setSearchTerm] = useState("");
   const [savedMessage, setSavedMessage] = useState("");
-  const selectedLocation = locations.find((location) => location.id === selectedId) ?? locations[0];
+  const selectedLocation = locations.find((location) => location.id === selectedId) ?? locations[0] ?? campusNavigationLocations[0];
   const filteredLocations = useMemo(() => {
     const normalized = normalizeSearch(searchTerm);
     if (!normalized) return locations;
@@ -61,6 +62,18 @@ export function TransferCampusNavigationClient() {
     } catch {
       setVisited([]);
     }
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    readStudentCampusNavigationLocations().then((result) => {
+      if (!mounted) return;
+      setLocations(result.locations);
+      setSelectedId((current) => result.locations.some((location) => location.id === current) ? current : result.locations[0].id);
+    });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -315,7 +328,13 @@ function ImagePanel({ label, src, alt }: { label: string; src: string; alt: stri
   return (
     <figure className="border-t border-aggie-silver/15 bg-aggie-navy/60 p-4 xl:border-l xl:border-t-0">
       <p className="mb-3 text-xs font-black uppercase tracking-[0.16em] text-aggie-silver">{label}</p>
-      <img src={src} alt={alt} className="aspect-[4/3] w-full rounded-lg object-cover" />
+      {src ? (
+        <img src={src} alt={alt} className="aspect-[4/3] w-full rounded-lg object-cover" />
+      ) : (
+        <div className="grid aspect-[4/3] w-full place-items-center rounded-lg border border-aggie-silver/15 bg-white/[0.045] p-4 text-center text-sm font-bold text-aggie-muted">
+          Image path not added yet.
+        </div>
+      )}
     </figure>
   );
 }

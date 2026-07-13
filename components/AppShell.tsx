@@ -10,6 +10,7 @@ import {
   Home,
   LayoutDashboard,
   LogOut,
+  MapPinned,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
@@ -71,6 +72,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     ? [
         ...roleAwareSidebarItems,
         { href: "/admin/student-athlete-database", label: "Student Database", icon: Database },
+        { href: "/admin/campus-locations", label: "Campus Locations", icon: MapPinned },
         { href: "/settings", label: "Settings", icon: Settings },
       ]
     : roleAwareSidebarItems;
